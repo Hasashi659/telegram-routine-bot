@@ -277,28 +277,13 @@ def health():
 
 @app.route('/check')
 def check():
-    """Endpoint para cron - SIEMPRE envía estado"""
-    current, _ = get_current_task()
-    next_task, _ = get_next_task()
-    minutes = get_minutes_until(next_task["time"]) if next_task else 0
-    progress = get_progress()
-    
-    # SIEMPRE enviar estado actual
-    msg = f"""📍 <b>ESTADO</b> {get_current_time_str()}
-
-<b>Ahora:</b> {current['emoji']} {current['task']}
-<b>Próxima:</b> {next_task['task'] if next_task else 'N/A'} (en {minutes} min)
-📊 {progress}%"""
-    
-    send_message(msg)
-    
-    # Además, alertas especiales
-    check_and_notify()
+    """Endpoint para cron - solo envía notificaciones necesarias"""
+    notifications = check_and_notify()
     
     return jsonify({
         "status": "checked",
         "time": get_current_time().isoformat(),
-        "current_task": current["task"]
+        "notifications_sent": len(notifications)
     })
 
 @app.route('/test')
