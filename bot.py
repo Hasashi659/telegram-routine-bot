@@ -6,9 +6,12 @@ Desplegar en Render.com para 24/7
 import os
 import time
 import logging
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 import requests
 from flask import Flask, jsonify
+
+# Zona horaria de Colombia (UTC-5)
+TZ_COLOMBIA = timezone(timedelta(hours=-5))
 
 # Configurar logging
 logging.basicConfig(level=logging.INFO)
@@ -75,9 +78,13 @@ def send_message(text):
         logger.error(f"Error enviando: {e}")
         return False
 
+def get_current_time():
+    """Obtener hora actual en Colombia"""
+    return datetime.now(TZ_COLOMBIA)
+
 def get_current_task():
     """Obtener tarea actual"""
-    current_time = datetime.now().strftime("%H:%M")
+    current_time = get_current_time().strftime("%H:%M")
     for i in range(len(ROUTINE) - 1, -1, -1):
         if current_time >= ROUTINE[i]["time"]:
             return ROUTINE[i]
@@ -85,7 +92,7 @@ def get_current_task():
 
 def get_next_task():
     """Obtener siguiente tarea"""
-    current_time = datetime.now().strftime("%H:%M")
+    current_time = get_current_time().strftime("%H:%M")
     for task in ROUTINE:
         if current_time < task["time"]:
             return task
@@ -93,12 +100,13 @@ def get_next_task():
 
 def get_minutes_until_next():
     """Minutos hasta siguiente tarea"""
-    current_time = datetime.now().strftime("%H:%M")
+    current_time = get_current_time().strftime("%H:%M")
     for task in ROUTINE:
         if current_time < task["time"]:
-            now = datetime.now()
+            now = get_current_time()
             task_time = datetime.strptime(task["time"], "%H:%M").replace(
-                year=now.year, month=now.month, day=now.day
+                year=now.year, month=now.month, day=now.day,
+                tzinfo=TZ_COLOMBIA
             )
             diff = task_time - now
             return max(0, int(diff.total_seconds() / 60))
@@ -106,7 +114,7 @@ def get_minutes_until_next():
 
 def get_progress():
     """Progreso del día"""
-    current_time = datetime.now().strftime("%H:%M")
+    current_time = get_current_time().strftime("%H:%M")
     completed = sum(1 for t in ROUTINE if current_time >= t["time"])
     return int((completed / len(ROUTINE)) * 100)
 
@@ -139,7 +147,8 @@ def home():
         "next_task": next_task["task"],
         "minutes_until_next": minutes,
         "progress": f"{progress}%",
-        "time": datetime.now().isoformat()
+        "time": get_current_time().isoformat(),
+        "timezone": "America/Bogota (UTC-5)"
     })
 
 @app.route('/health')
@@ -163,7 +172,7 @@ def check_and_notify():
     global last_notified_task
     
     current = get_current_task()
-    current_time = datetime.now().strftime("%H:%M")
+    current_time = get_current_time().strftime("%H:%M")
     
     # Notificar cambio de tarea
     if current["task"] != last_notified_task:
