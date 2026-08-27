@@ -20,8 +20,8 @@ logger = logging.getLogger(__name__)
 # CONFIGURACIÓN
 # ============================================
 
-BOT_TOKEN = os.environ.get('BOT_TOKEN', '8866031857:AAFebwtF2BtmzQNYJQnT6t2r1ntqH38fhDo')
-OWNER_CHAT_ID = os.environ.get('CHAT_ID', '6613206978')
+BOT_TOKEN = os.environ.get('BOT_TOKEN') or '8866031857:AAFebwtF2BtmzQNYJQnT6t2r1ntqH38fhDo'
+OWNER_CHAT_ID = os.environ.get('CHAT_ID') or '6613206978'
 
 # ============================================
 # HORARIO DE LA RUTINA
