@@ -118,14 +118,20 @@ app = Flask(__name__)
 
 @app.route('/')
 def home():
-    """Endpoint principal - verifica que el bot esté vivo"""
+    """Endpoint principal - verifica que el bot esté vivo y envía notificación"""
     current = get_current_task()
     next_task = get_next_task()
     minutes = get_minutes_until_next()
     progress = get_progress()
     
-    # Enviar notificación de cambio si es hora
-    check_and_notify()
+    # Siempre enviar notificación de tarea actual
+    msg = f"""🔔 <b>TAREA ACTUAL</b>
+
+<b>Ahora:</b> {current['emoji']} {current['task']}
+<b>Próxima:</b> {next_task['task']} (en {minutes} min)
+📊 Progreso: {progress}%"""
+    
+    send_message(msg)
     
     return jsonify({
         "status": "running",
