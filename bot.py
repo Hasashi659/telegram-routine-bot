@@ -127,16 +127,14 @@ def time_to_minutes(time_str):
 # ============================================
 
 def check_and_notify():
-    """Verificar y enviar notificaciones según la lógica:
-    1. 5 minutos antes de cada tarea → Alerta
-    2. Cuando empieza la tarea → Notificación
-    3. Cada 20 minutos → Recordatorio de tarea actual
-    """
+    """Verificar y enviar notificaciones según la lógica"""
     now = get_current_time()
     now_str = get_current_time_str()
     now_minutes = time_to_minutes(now_str)
     current_task, current_idx = get_current_task()
     next_task, next_idx = get_next_task()
+    
+    logger.info(f"Check: now={now_str}, now_minutes={now_minutes}, current={current_task['task']}, next={next_task['task'] if next_task else 'N/A'}")
     
     notifications = []
     
@@ -243,9 +241,10 @@ Descansa bien. ¡Mañana un nuevo día!"""
     
     # Enviar todas las notificaciones
     for notif in notifications:
+        logger.info(f"Enviando notificación: {notif['type']}")
         send_message(notif["message"])
-        logger.info(f"Notificación enviada: {notif['type']}")
     
+    logger.info(f"Total notificaciones enviadas: {len(notifications)}")
     return notifications
 
 # ============================================
@@ -279,13 +278,19 @@ def health():
 @app.route('/check')
 def check():
     """Endpoint para cron - verifica y envía notificaciones"""
-    notifications = check_and_notify()
-    
-    return jsonify({
-        "status": "checked",
-        "time": get_current_time().isoformat(),
-        "notifications_sent": len(notifications)
-    })
+    try:
+        notifications = check_and_notify()
+        return jsonify({
+            "status": "checked",
+            "time": get_current_time().isoformat(),
+            "notifications_sent": len(notifications)
+        })
+    except Exception as e:
+        logger.error(f"Error en check: {e}")
+        return jsonify({
+            "status": "error",
+            "error": str(e)
+        })
 
 @app.route('/test')
 def test():
