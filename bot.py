@@ -4,7 +4,6 @@ Desplegar en Render.com para 24/7
 """
 
 import os
-import json
 import logging
 from datetime import datetime, timezone, timedelta
 import requests
@@ -54,56 +53,6 @@ ROUTINE = [
 ]
 
 # ============================================
-# ESTADO DE NOTIFICACIONES
-# ============================================
-
-# Guardar qué notificaciones ya se enviaron hoy
-notifications_sent = {
-    "date": "",
-    "warned": [],    # Tareas para las que se envió alerta de 5 min
-    "started": [],   # Tareas que ya empezaron
-    "morning": False,
-    "night": False
-}
-
-def load_notifications():
-    """Cargar estado de notificaciones"""
-    global notifications_sent
-    try:
-        if os.path.exists('notifications_state.json'):
-            with open('notifications_state.json', 'r') as f:
-                data = json.load(f)
-                # Solo cargar si es del mismo día
-                if data.get("date") == get_current_time().strftime("%Y-%m-%d"):
-                    notifications_sent = data
-                    logger.info("Estado de notificaciones cargado")
-    except Exception as e:
-        logger.error(f"Error cargando estado: {e}")
-
-def save_notifications():
-    """Guardar estado de notificaciones"""
-    try:
-        notifications_sent["date"] = get_current_time().strftime("%Y-%m-%d")
-        with open('notifications_state.json', 'w') as f:
-            json.dump(notifications_sent, f)
-    except Exception as e:
-        logger.error(f"Error guardando estado: {e}")
-
-def reset_daily():
-    """Resetear notificaciones diarias"""
-    global notifications_sent
-    today = get_current_time().strftime("%Y-%m-%d")
-    if notifications_sent["date"] != today:
-        notifications_sent = {
-            "date": today,
-            "warned": [],
-            "started": [],
-            "morning": False,
-            "night": False
-        }
-        logger.info(f"Notificaciones reseteadas para {today}")
-
-# ============================================
 # FUNCIONES DE TELEGRAM
 # ============================================
 
@@ -128,13 +77,6 @@ def send_message(text):
         logger.error(f"Error enviando: {e}")
         return False
 
-def is_owner(update):
-    """Verificar si el mensaje es del dueño"""
-    if update.get("message"):
-        chat_id = str(update["message"]["chat"]["id"])
-        return chat_id == OWNER_CHAT_ID
-    return False
-
 def get_current_time():
     """Obtener hora actual en Colombia"""
     return datetime.now(TZ_COLOMBIA)
@@ -142,6 +84,10 @@ def get_current_time():
 def get_current_time_str():
     """Hora actual como string HH:MM"""
     return get_current_time().strftime("%H:%M")
+
+def get_current_time_full():
+    """Hora actual como string HH:MM:SS"""
+    return get_current_time().strftime("%H:%M:%S")
 
 def get_current_task():
     """Obtener tarea actual"""
@@ -176,108 +122,6 @@ def get_progress():
     return int((completed / len(ROUTINE)) * 100)
 
 # ============================================
-# SISTEMA DE NOTIFICACIONES
-# ============================================
-
-def check_notifications():
-    """Verificar y enviar notificaciones automáticas"""
-    reset_daily()
-    load_notifications()
-    
-    now = get_current_time_str()
-    current_task, current_idx = get_current_task()
-    next_task, next_idx = get_next_task()
-    
-    # ========================================
-    # 1. NOTIFICACIÓN "5 MINUTOS ANTES"
-    # ========================================
-    if next_task:
-        minutes_left = get_minutes_until(next_task["time"])
-        
-        # Alerta a los 5 minutos exactos
-        if minutes_left == 5 and next_task["time"] not in notifications_sent["warned"]:
-            msg = f"""⏰ <b>5 MINUTOS</b>
-
-<b>Prepárate para:</b> {next_task['emoji']} {next_task['task']}
-<b>Empieza a las:</b> {next_task['time']}
-
-¡Quedan 5 minutos!"""
-            
-            send_message(msg)
-            notifications_sent["warned"].append(next_task["time"])
-            save_notifications()
-            logger.info(f"Alerta 5 min enviada para {next_task['task']}")
-        
-        # Alerta a los 2 minutos (urgente)
-        if minutes_left == 2 and f"{next_task['time']}_2min" not in notifications_sent["warned"]:
-            msg = f"""🚨 <b>2 MINUTOS</b>
-
-<b>Ya empieza:</b> {next_task['emoji']} {next_task['task']}
-<b>A las:</b> {next_task['time']}
-
-¡Prepárate ahora!"""
-            
-            send_message(msg)
-            notifications_sent["warned"].append(f"{next_task['time']}_2min")
-            save_notifications()
-    
-    # ========================================
-    # 2. NOTIFICACIÓN "TAREA EMPEZÓ"
-    # ========================================
-    if current_task["time"] not in notifications_sent["started"]:
-        progress = get_progress()
-        
-        msg = f"""🔔 <b>TAREA INICIADA</b>
-
-<b>Ahora:</b> {current_task['emoji']} {current_task['task']}
-<b>Horario:</b> {current_task['time']} - {next_task['time'] if next_task else 'Fin'}
-📊 Progreso: {progress}%"""
-        
-        send_message(msg)
-        notifications_sent["started"].append(current_task["time"])
-        save_notifications()
-        logger.info(f"Notificación tarea iniciada: {current_task['task']}")
-    
-    # ========================================
-    # 3. BUENOS DÍAS (05:30)
-    # ========================================
-    if now >= "05:30" and now < "05:31" and not notifications_sent["morning"]:
-        date = get_current_time().strftime("%A %d de %B")
-        msg = f"""🌅 <b>¡BUENOS DÍAS!</b>
-
-<b>Fecha:</b> {date}
-<b>Hora:</b> {now}
-
-<b>Rutina de hoy:</b>
-🧠 05:30 - Despertar
-💪 06:30 - Ejercicio
-💼 08:00 - Trabajo
-💻 13:00 - Vibecoding
-📐 19:00 - Estudio
-
-¡Que tengas un día productivo!"""
-        
-        send_message(msg)
-        notifications_sent["morning"] = True
-        save_notifications()
-    
-    # ========================================
-    # 4. BUENAS NOCHES (22:00)
-    # ========================================
-    if now >= "22:00" and now < "22:01" and not notifications_sent["night"]:
-        progress = get_progress()
-        msg = f"""🌙 <b>BUENAS NOCHES</b>
-
-<b>Progreso de hoy:</b> {progress}%
-<b> hora:</b> {now}
-
-Descansa bien. ¡Mañana un nuevo día!"""
-        
-        send_message(msg)
-        notifications_sent["night"] = True
-        save_notifications()
-
-# ============================================
 # SERVIDOR WEB
 # ============================================
 
@@ -285,9 +129,7 @@ app = Flask(__name__)
 
 @app.route('/')
 def home():
-    """Endpoint principal - verifica notificaciones"""
-    check_notifications()
-    
+    """Endpoint principal"""
     current, _ = get_current_task()
     next_task, _ = get_next_task()
     minutes = get_minutes_until(next_task["time"]) if next_task else 0
@@ -309,11 +151,26 @@ def health():
 
 @app.route('/check')
 def check():
-    """Endpoint para cron - solo verifica notificaciones"""
-    check_notifications()
+    """Endpoint para cron - envía notificación de tarea actual"""
+    current, _ = get_current_task()
+    next_task, _ = get_next_task()
+    minutes = get_minutes_until(next_task["time"]) if next_task else 0
+    progress = get_progress()
+    
+    # Enviar notificación con estado actual
+    msg = f"""🔔 <b>ESTADO ACTUAL</b>
+
+<b>Ahora:</b> {current['emoji']} {current['task']}
+<b>Próxima:</b> {next_task['task'] if next_task else 'N/A'} (en {minutes} min)
+📊 Progreso: {progress}%
+🕐 Hora: {get_current_time_str()}"""
+    
+    send_message(msg)
+    
     return jsonify({
         "status": "checked",
-        "time": get_current_time().isoformat()
+        "time": get_current_time().isoformat(),
+        "notification_sent": True
     })
 
 @app.route('/test')
@@ -330,12 +187,11 @@ def status():
     minutes = get_minutes_until(next_task["time"]) if next_task else 0
     progress = get_progress()
     
-    msg = f"""📊 <b>ESTADO DEL BOT</b>
+    msg = f"""📊 <b>ESTADO</b>
 
-<b>Tarea actual:</b> {current['emoji']} {current['task']}
+<b>Ahora:</b> {current['emoji']} {current['task']}
 <b>Próxima:</b> {next_task['task'] if next_task else 'N/A'} ({minutes} min)
-<b>Progreso:</b> {progress}%
-<b>Hora:</b> {get_current_time().strftime('%H:%M')}"""
+<b>Progreso:</b> {progress}%"""
     
     send_message(msg)
     return jsonify({"status": "sent"})
@@ -348,8 +204,7 @@ def webhook():
     if not data:
         return jsonify({"status": "no data"})
     
-    if not is_owner(data):
-        logger.warning(f"Mensaje bloqueado de usuario no autorizado")
+    if data.get("message", {}).get("from", {}).get("id") != int(OWNER_CHAT_ID):
         return jsonify({"status": "blocked"})
     
     if data.get("message", {}).get("text"):
@@ -388,9 +243,6 @@ def webhook():
 
 if __name__ == '__main__':
     logger.info("Iniciando bot...")
-    
-    # Cargar estado
-    load_notifications()
     
     # Mensaje de inicio
     send_message("🤖 <b>Bot 24/7 ONLINE</b>\n\nNotificaciones automáticas activadas.\n\nComandos: /status, /test, /help")
