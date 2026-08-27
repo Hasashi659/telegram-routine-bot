@@ -85,10 +85,6 @@ def get_current_time_str():
     """Hora actual como string HH:MM"""
     return get_current_time().strftime("%H:%M")
 
-def get_current_time_full():
-    """Hora actual como string HH:MM:SS"""
-    return get_current_time().strftime("%H:%M:%S")
-
 def get_current_task():
     """Obtener tarea actual"""
     current_time = get_current_time_str()
@@ -121,6 +117,137 @@ def get_progress():
     completed = sum(1 for t in ROUTINE if current_time >= t["time"])
     return int((completed / len(ROUTINE)) * 100)
 
+def time_to_minutes(time_str):
+    """Convertir HH:MM a minutos desde medianoche"""
+    h, m = map(int, time_str.split(":"))
+    return h * 60 + m
+
+# ============================================
+# SISTEMA DE NOTIFICACIONES INTELIGENTE
+# ============================================
+
+def check_and_notify():
+    """Verificar y enviar notificaciones según la lógica:
+    1. 5 minutos antes de cada tarea → Alerta
+    2. Cuando empieza la tarea → Notificación
+    3. Cada 20 minutos → Recordatorio de tarea actual
+    """
+    now = get_current_time()
+    now_str = get_current_time_str()
+    now_minutes = time_to_minutes(now_str)
+    current_task, current_idx = get_current_task()
+    next_task, next_idx = get_next_task()
+    
+    notifications = []
+    
+    # ========================================
+    # 1. ALERTA 5 MINUTOS ANTES
+    # ========================================
+    if next_task:
+        next_minutes = time_to_minutes(next_task["time"])
+        diff = next_minutes - now_minutes
+        
+        if diff == 5:
+            notifications.append({
+                "type": "warning_5min",
+                "message": f"""⏰ <b>5 MINUTOS</b>
+
+<b>Prepárate para:</b> {next_task['emoji']} {next_task['task']}
+<b>Empieza a las:</b> {next_task['time']}
+
+¡Quedan 5 minutos!"""
+            })
+        
+        elif diff == 2:
+            notifications.append({
+                "type": "warning_2min",
+                "message": f"""🚨 <b>2 MINUTOS</b>
+
+<b>Ya empieza:</b> {next_task['emoji']} {next_task['task']}
+<b>A las:</b> {next_task['time']}
+
+¡Prepárate ahora!"""
+            })
+    
+    # ========================================
+    # 2. TAREA EMPEZÓ (hora exacta)
+    # ========================================
+    if now_str in [t["time"] for t in ROUTINE]:
+        progress = get_progress()
+        end_time = next_task["time"] if next_task else "Fin"
+        
+        notifications.append({
+            "type": "task_started",
+            "message": f"""🔔 <b>TAREA INICIADA</b>
+
+<b>Ahora:</b> {current_task['emoji']} {current_task['task']}
+<b>Horario:</b> {current_task['time']} - {end_time}
+📊 Progreso: {progress}%"""
+        })
+    
+    # ========================================
+    # 3. CADA 20 MINUTOS - RECORDATORIO
+    # ========================================
+    # Calcular minutos desde que empezó la tarea actual
+    current_start_minutes = time_to_minutes(current_task["time"])
+    minutes_in_task = now_minutes - current_start_minutes
+    
+    # Enviar cada 20 minutos (0, 20, 40, 60...)
+    if minutes_in_task >= 0 and minutes_in_task % 20 == 0:
+        remaining = get_minutes_until(next_task["time"]) if next_task else 0
+        
+        notifications.append({
+            "type": "reminder_20min",
+            "message": f"""📍 <b>RECORDATORIO</b>
+
+<b>Tarea actual:</b> {current_task['emoji']} {current_task['task']}
+<b>Tiempo en tarea:</b> {minutes_in_task} min
+<b>Faltan:</b> {remaining} min para siguiente
+📊 Progreso: {get_progress()}%"""
+        })
+    
+    # ========================================
+    # 4. BUENOS DÍAS (05:30)
+    # ========================================
+    if now_str == "05:30":
+        date = now.strftime("%A %d de %B")
+        notifications.append({
+            "type": "morning",
+            "message": f"""🌅 <b>¡BUENOS DÍAS!</b>
+
+<b>Fecha:</b> {date}
+
+<b>Rutina de hoy:</b>
+🧠 05:30 - Despertar
+💪 06:30 - Ejercicio
+💼 08:00 - Trabajo
+💻 13:00 - Vibecoding
+📐 19:00 - Estudio
+
+¡Que tengas un día productivo!"""
+        })
+    
+    # ========================================
+    # 5. BUENAS NOCHES (22:00)
+    # ========================================
+    if now_str == "22:00":
+        progress = get_progress()
+        notifications.append({
+            "type": "night",
+            "message": f"""🌙 <b>BUENAS NOCHES</b>
+
+<b>Progreso de hoy:</b> {progress}%
+
+Descansa bien. ¡Mañana un nuevo día!"""
+        })
+    
+    # Enviar todas las notificaciones
+    for notif in notifications:
+        send_message(notif["message"])
+        logger.info(f"Notificación enviada: {notif['type']}")
+    
+    return notifications
+
 # ============================================
 # SERVIDOR WEB
 # ============================================
@@ -151,26 +278,13 @@ def health():
 
 @app.route('/check')
 def check():
-    """Endpoint para cron - envía notificación de tarea actual"""
-    current, _ = get_current_task()
-    next_task, _ = get_next_task()
-    minutes = get_minutes_until(next_task["time"]) if next_task else 0
-    progress = get_progress()
-    
-    # Enviar notificación con estado actual
-    msg = f"""🔔 <b>ESTADO ACTUAL</b>
-
-<b>Ahora:</b> {current['emoji']} {current['task']}
-<b>Próxima:</b> {next_task['task'] if next_task else 'N/A'} (en {minutes} min)
-📊 Progreso: {progress}%
-🕐 Hora: {get_current_time_str()}"""
-    
-    send_message(msg)
+    """Endpoint para cron - verifica y envía notificaciones"""
+    notifications = check_and_notify()
     
     return jsonify({
         "status": "checked",
         "time": get_current_time().isoformat(),
-        "notification_sent": True
+        "notifications_sent": len(notifications)
     })
 
 @app.route('/test')
@@ -245,7 +359,7 @@ if __name__ == '__main__':
     logger.info("Iniciando bot...")
     
     # Mensaje de inicio
-    send_message("🤖 <b>Bot 24/7 ONLINE</b>\n\nNotificaciones automáticas activadas.\n\nComandos: /status, /test, /help")
+    send_message("🤖 <b>Bot 24/7 ONLINE</b>\n\n✅ 5 min antes de cada tarea\n✅ Cuando empieza la tarea\n✅ Cada 20 min recordatorio\n\nComandos: /status, /test, /help")
     
     # Iniciar servidor
     app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 10000)))
