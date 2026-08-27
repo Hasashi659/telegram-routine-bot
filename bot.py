@@ -8,7 +8,7 @@ import time
 import logging
 from datetime import datetime, timezone, timedelta
 import requests
-from flask import Flask, jsonify
+from flask import Flask, jsonify, request
 
 # Zona horaria de Colombia (UTC-5)
 TZ_COLOMBIA = timezone(timedelta(hours=-5))
@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 # ============================================
 
 BOT_TOKEN = os.environ.get('BOT_TOKEN', '8872994414:AAFBL1OFjUSOSmEcZHwKjeXWllvztHZUZUI')
-CHAT_ID = os.environ.get('CHAT_ID', '6613206978')
+OWNER_CHAT_ID = os.environ.get('CHAT_ID', '6613206978')  # Solo este ID puede usar el bot
 
 # ============================================
 # HORARIO DE LA RUTINA
@@ -58,10 +58,10 @@ ROUTINE = [
 # ============================================
 
 def send_message(text):
-    """Enviar mensaje a Telegram"""
+    """Enviar mensaje SOLO al dueño"""
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
     data = {
-        "chat_id": CHAT_ID,
+        "chat_id": OWNER_CHAT_ID,  # Solo envía al dueño
         "text": text,
         "parse_mode": "HTML"
     }
@@ -69,7 +69,7 @@ def send_message(text):
         response = requests.post(url, json=data, timeout=10)
         result = response.json()
         if result.get("ok"):
-            logger.info(f"Mensaje enviado: {text[:50]}...")
+            logger.info(f"Mensaje enviado al dueño: {text[:50]}...")
             return True
         else:
             logger.error(f"Error Telegram: {result.get('description')}")
@@ -77,6 +77,13 @@ def send_message(text):
     except Exception as e:
         logger.error(f"Error enviando: {e}")
         return False
+
+def is_owner(update):
+    """Verificar si el mensaje es del dueño"""
+    if update.get("message"):
+        chat_id = str(update["message"]["chat"]["id"])
+        return chat_id == OWNER_CHAT_ID
+    return False
 
 def get_current_time():
     """Obtener hora actual en Colombia"""
@@ -161,6 +168,44 @@ def test():
     send_message("🤖 Test desde Render.com!")
     return jsonify({"status": "test sent"})
 
+@app.route('/webhook', methods=['POST'])
+def webhook():
+    """Webhook para recibir mensajes - SOLO procesa del dueño"""
+    data = request.get_json()
+    
+    if not data:
+        return jsonify({"status": "no data"})
+    
+    # Verificar si es del dueño
+    if not is_owner(data):
+        logger.warning(f"Mensaje bloqueado de usuario no autorizado: {data}")
+        return jsonify({"status": "blocked"})
+    
+    # Procesar comando del dueño
+    if data.get("message", {}).get("text"):
+        text = data["message"]["text"]
+        
+        if text == "/status":
+            current = get_current_task()
+            next_task = get_next_task()
+            minutes = get_minutes_until_next()
+            progress = get_progress()
+            
+            msg = f"""📊 <b>ESTADO DEL BOT</b>
+
+<b>Tarea actual:</b> {current['emoji']} {current['task']}
+<b>Próxima:</b> {next_task['task']} ({minutes} min)
+<b>Progreso:</b> {progress}%
+<b>Hora Colombia:</b> {get_current_time().strftime('%H:%M')}
+<b>Estado:</b> ✅ Activo 24/7"""
+            
+            send_message(msg)
+        
+        elif text == "/test":
+            send_message("✅ Bot funcionando correctamente!")
+    
+    return jsonify({"status": "ok"})
+
 # ============================================
 # LÓGICA DE NOTIFICACIONES
 # ============================================
@@ -210,11 +255,32 @@ def check_and_notify():
 # MAIN
 # ============================================
 
+def setup_webhook():
+    """Configurar webhook para recibir mensajes"""
+    render_url = os.environ.get('RENDER_EXTERNAL_URL', 'https://telegram-routine-bot.onrender.com')
+    webhook_url = f"{render_url}/webhook"
+    
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/setWebhook"
+    data = {"url": webhook_url}
+    
+    try:
+        response = requests.post(url, json=data, timeout=10)
+        result = response.json()
+        if result.get("ok"):
+            logger.info(f"Webhook configurado: {webhook_url}")
+        else:
+            logger.error(f"Error webhook: {result.get('description')}")
+    except Exception as e:
+        logger.error(f"Error configurando webhook: {e}")
+
 if __name__ == '__main__':
     logger.info("Iniciando bot...")
     
-    # Mensaje de inicio
-    send_message("🤖 <b>Bot 24/7 ONLINE</b>\n\nEl notificador está activo en la nube.")
+    # Configurar webhook
+    setup_webhook()
+    
+    # Mensaje de inicio SOLO al dueño
+    send_message("🤖 <b>Bot 24/7 ONLINE</b>\n\nEl notificador está activo y SEGURO.\nSolo tú puedes recibir notificaciones.\n\nComandos: /status, /test")
     
     # Iniciar servidor
     app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 10000)))
